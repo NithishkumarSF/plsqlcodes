@@ -1,0 +1,276 @@
+CREATE OR REPLACE PROCEDURE INTEGRA.ThirdPartyExpenseMonthly
+AS
+BEGIN
+DECLARE            
+    --V_ORD_ID PLS_INTEGER:=0;
+    --V_DOC_NUMBER PLS_INTEGER:=0;
+    V_ECCKT ASAP.CIRCUIT.EXCHANGE_CARRIER_CIRCUIT_ID%TYPE;
+    V_CKT_DESIGN_ID PLS_INTEGER:=0;
+    V_CKT_STATUS ASAP.CIRCUIT.STATUS%TYPE;
+    --V_SERV_DESIGN PLS_INTEGER:=0;
+    V_MAX_CKT_XREF_SEQ PLS_INTEGER:=0;
+    V_DLR_MAX_CIRCUIT_XREF_SEQ PLS_INTEGER:=0;
+    V_MAX_ISSUE_NBR ASAP.DLR_CIRCUIT_DESIGN_LINE.ISSUE_NBR%TYPE;
+    V_MAX_SEQ_NBR PLS_INTEGER:=0;
+    V_MAX_ROW_SEQ_NBR PLS_INTEGER:=0;
+    V_BLOCK_IND ASAP.DLR_CIRCUIT_DESIGN_LINE.BLOCK_IND%TYPE;
+    --V_MISC VARCHAR(50);
+    V_FAC_ID ASAP.CIRCUIT.EXCHANGE_CARRIER_CIRCUIT_ID%TYPE;
+    V_VLAN PLS_INTEGER:=0;
+    V_FAC_CKT_DESIGN_ID PLS_INTEGER:=0;
+    V_CLLI VARCHAR(50);
+    V_CKT_POS PLS_INTEGER:=0;    
+    V_ORG_LOC VARCHAR2(250);
+    V_ORG_LOC_ID VARCHAR2(250);
+    V_RATE_CODE VARCHAR2(25);
+    V_TERM_LOC VARCHAR2(250);
+    V_TERM_LOC_ID VARCHAR2(250);
+    V_COMPANY_NAME VARCHAR2(250);
+    V_CONNECTION_SPEC VARCHAR2(100);
+    V_CNT PLS_INTEGER:=0;
+    --V_CNT0 PLS_INTEGER:=0;
+    V_CNT1 PLS_INTEGER:=0;
+    V_CNT2 PLS_INTEGER:=0;     
+    V_CNT3 PLS_INTEGER:=0; 
+    V_CNT4 PLS_INTEGER:=0; 
+    V_CNT5 PLS_INTEGER:=0; 
+    V_CNT6 PLS_INTEGER:=0; 
+    V_CNT7 PLS_INTEGER:=0; 
+    V_CNT8 PLS_INTEGER:=0; 
+    V_CNT8_1 PLS_INTEGER:=0; 
+    
+    TEMP_CKT_SEQ PLS_INTEGER:=0;
+    V_LOC VARCHAR2(50);
+            
+    BEGIN    
+        DELETE FROM INTEGRA.MONTHLY_EXPENSE WHERE REMARKS IS NULL AND LEGACY_CKT_ID IS NULL AND NET_CKT_ID IS NULL;
+        
+        FOR REC_O IN (SELECT  * FROM INTEGRA.MONTHLY_EXPENSE WHERE REMARKS IS NULL AND PROCESSED_DATE IS NULL)
+        LOOP 
+        BEGIN                   
+            SELECT COUNT(EXCHANGE_CARRIER_CIRCUIT_ID) INTO V_CNT FROM ASAP.CIRCUIT 
+            WHERE TRIM(REPLACE(REPLACE(EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.NET_CKT_ID,'/',''),' ','')) 
+            OR TRIM(REPLACE(REPLACE(EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.LEGACY_CKT_ID,'/',''),' ',''));
+             
+            IF(V_CNT > 0) THEN
+            BEGIN
+                IF(REC_O.LEGACY_CKT_ID IS NOT NULL) THEN              
+                    SELECT EXCHANGE_CARRIER_CIRCUIT_ID, STATUS, CIRCUIT_DESIGN_ID INTO V_ECCKT, V_CKT_STATUS, V_CKT_DESIGN_ID FROM ASAP.CIRCUIT 
+                    WHERE TRIM(REPLACE(REPLACE(EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.LEGACY_CKT_ID,'/',''),' ',''))
+                    AND CIRCUIT_DESIGN_ID = (SELECT MAX(C2.CIRCUIT_DESIGN_ID) FROM ASAP.CIRCUIT C2
+                    WHERE TRIM(REPLACE(REPLACE(C2.EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.LEGACY_CKT_ID,'/',''),' ',''))); 
+                    --'1234 /DS0   /AAPKOKXA   /FABAARXA   ';                
+                END IF; 
+                
+                IF(REC_O.NET_CKT_ID IS NOT NULL) THEN               
+                    SELECT EXCHANGE_CARRIER_CIRCUIT_ID, STATUS, CIRCUIT_DESIGN_ID INTO V_ECCKT, V_CKT_STATUS, V_CKT_DESIGN_ID FROM ASAP.CIRCUIT 
+                    WHERE TRIM(REPLACE(REPLACE(EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.NET_CKT_ID,'/',''),' ',''))
+                    AND CIRCUIT_DESIGN_ID = (SELECT MAX(C2.CIRCUIT_DESIGN_ID) FROM ASAP.CIRCUIT C2
+                    WHERE TRIM(REPLACE(REPLACE(C2.EXCHANGE_CARRIER_CIRCUIT_ID,'/',''),' ','')) = TRIM(REPLACE(REPLACE(REC_O.NET_CKT_ID,'/',''),' ',''))); 
+                    --'1234 /DS0   /AAPKOKXA   /FABAARXA   ';                
+                END IF;
+                
+                SELECT COUNT(CIRCUIT_XREF_SEQ) INTO V_CNT1 FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID =V_CKT_DESIGN_ID;
+                
+                SELECT MAX(ISSUE_NBR) INTO V_MAX_ISSUE_NBR FROM ASAP.DLR_CIRCUIT_DESIGN_LINE WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID;
+                
+                IF V_MAX_ISSUE_NBR IS NOT NULL THEN
+                BEGIN                
+                    SELECT COUNT(CIRCUIT_DESIGN_ID) INTO V_CNT2 FROM ASAP.DLR_CIRCUIT_DESIGN_LINE WHERE LOCATION = REC_O.VENDOR_CKT_ID AND CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID;                   
+                    IF(V_CNT2 = 0)THEN 
+                    BEGIN
+                         --CREATING  XREF IN CIRCUIT_XREF TABLE
+                        IF(V_CNT1= 0) THEN                                    
+                            INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID) 
+                            VALUES( V_CKT_DESIGN_ID, '1', REC_O.VENDOR_CKT_ID, 'S', SYSDATE, 'TESTINT');                                        
+                        ELSE  
+                        BEGIN
+                            SELECT MAX(CIRCUIT_XREF_SEQ) INTO V_MAX_CKT_XREF_SEQ  FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID =V_CKT_DESIGN_ID;                                       
+                            V_MAX_CKT_XREF_SEQ :=  V_MAX_CKT_XREF_SEQ+1;
+                                                                                
+                            INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID) 
+                            VALUES( V_CKT_DESIGN_ID, V_MAX_CKT_XREF_SEQ, REC_O.VENDOR_CKT_ID, 'S', SYSDATE, 'TESTINT');
+                        END;                
+                        END IF;
+                                
+                        SELECT MAX(CIRCUIT_XREF_SEQ), MAX(SEQUENCE_NUMBER), MAX(ROW_SEQUENCE_NBR)
+                        INTO V_DLR_MAX_CIRCUIT_XREF_SEQ, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR
+                        FROM ASAP.DLR_CIRCUIT_DESIGN_LINE 
+                        WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR;
+                                
+                        V_MAX_SEQ_NBR := V_MAX_SEQ_NBR+1;
+                        V_MAX_ROW_SEQ_NBR := V_MAX_ROW_SEQ_NBR+1;
+                        V_DLR_MAX_CIRCUIT_XREF_SEQ := V_DLR_MAX_CIRCUIT_XREF_SEQ+1;
+                                
+                        SELECT 'XR' || NVL (TO_CHAR (SUBSTR (MAX (BLOCK_IND), 3) + 1), 1) INTO V_BLOCK_IND FROM ASAP.DLR_CIRCUIT_DESIGN_LINE
+                        WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR AND SUBSTR (BLOCK_IND, 1, 2) = 'XR' 
+                        AND SEQUENCE_NUMBER IN (SELECT MAX(SEQUENCE_NUMBER) FROM DLR_CIRCUIT_DESIGN_LINE WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID 
+                        AND SUBSTR (BLOCK_IND, 1, 2) = 'XR');
+                                        
+                        INSERT INTO ASAP.DLR_CIRCUIT_DESIGN_LINE(CIRCUIT_DESIGN_ID, ISSUE_NBR, SEQUENCE_NUMBER,ROW_SEQUENCE_NBR,LOCATION,LAST_MODIFIED_DATE, 
+                        LAST_MODIFIED_USERID, PRINT_THIS_LINE_ON_DLR_IND,BLOCK_IND,CIRCUIT_XREF_SEQ)
+                        VALUES(V_CKT_DESIGN_ID, V_MAX_ISSUE_NBR, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR, REC_O.VENDOR_CKT_ID, SYSDATE, 'TESTINT', 'Y', V_BLOCK_IND, 
+                        V_DLR_MAX_CIRCUIT_XREF_SEQ );
+                    END;
+                    END IF;
+                    
+                    --ALTERNATE VENDOR CIRCUIT                                        
+                    SELECT COUNT(CIRCUIT_DESIGN_ID) INTO V_CNT8 FROM ASAP.DLR_CIRCUIT_DESIGN_LINE WHERE LOCATION = TRIM(LEADING ':' FROM REC_O.ALT_VENDOR_ID) AND CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID;
+                    
+                    SELECT COUNT(CIRCUIT_XREF_ECCKT) INTO V_CNT8_1 FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = REC_O.ALT_VENDOR_ID;
+                    
+                    IF(V_CNT8_1 = 0)THEN 
+                    dbms_output.put_line('6');
+                        IF(V_CNT8 = 0)THEN 
+                        BEGIN
+                             --CREATING  XREF IN CIRCUIT_XREF TABLE
+                            IF(V_CNT1= 0) THEN                                    
+                                INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID, CIRCUIT_XREF_PROVIDER) 
+                                VALUES( V_CKT_DESIGN_ID, '2', CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), 'S', SYSDATE, 'TESTINT', REC_O.EXP_NAME);    
+                        
+                            ELSE  
+                            BEGIN
+                                SELECT MAX(CIRCUIT_XREF_SEQ) INTO V_MAX_CKT_XREF_SEQ  FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID =V_CKT_DESIGN_ID;
+                                
+                                V_MAX_CKT_XREF_SEQ :=  V_MAX_CKT_XREF_SEQ+1;
+                                
+                                INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID, CIRCUIT_XREF_PROVIDER) 
+                                VALUES( V_CKT_DESIGN_ID, V_MAX_CKT_XREF_SEQ, CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), 'S', SYSDATE, 'TESTINT', REC_O.EXP_NAME);
+                            END;   
+                            END IF; 
+
+                            --ADDED FOR ALTERNATE VENDOR ID
+                            SELECT MAX(CIRCUIT_XREF_SEQ), MAX(SEQUENCE_NUMBER), MAX(ROW_SEQUENCE_NBR)
+                            INTO V_DLR_MAX_CIRCUIT_XREF_SEQ, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR
+                            FROM ASAP.DLR_CIRCUIT_DESIGN_LINE 
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR;
+                            
+                            V_MAX_SEQ_NBR := V_MAX_SEQ_NBR+1;
+                            V_MAX_ROW_SEQ_NBR := V_MAX_ROW_SEQ_NBR+1;
+                            V_DLR_MAX_CIRCUIT_XREF_SEQ := V_DLR_MAX_CIRCUIT_XREF_SEQ+1;
+                                    
+                            SELECT 'XR' || NVL (TO_CHAR (SUBSTR (MAX (BLOCK_IND), 3) + 1), 1) INTO V_BLOCK_IND FROM ASAP.DLR_CIRCUIT_DESIGN_LINE
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR AND SUBSTR (BLOCK_IND, 1, 2) = 'XR' 
+                            AND SEQUENCE_NUMBER IN (SELECT MAX(SEQUENCE_NUMBER) FROM DLR_CIRCUIT_DESIGN_LINE WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID 
+                            AND SUBSTR (BLOCK_IND, 1, 2) = 'XR');
+                                            
+                            INSERT INTO ASAP.DLR_CIRCUIT_DESIGN_LINE(CIRCUIT_DESIGN_ID, ISSUE_NBR, SEQUENCE_NUMBER,ROW_SEQUENCE_NBR,LOCATION,LAST_MODIFIED_DATE, 
+                            LAST_MODIFIED_USERID, PRINT_THIS_LINE_ON_DLR_IND,BLOCK_IND,CIRCUIT_XREF_SEQ)
+                            VALUES(V_CKT_DESIGN_ID, V_MAX_ISSUE_NBR, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR, CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), SYSDATE, 'TESTINT', 'Y', V_BLOCK_IND, 
+                            V_DLR_MAX_CIRCUIT_XREF_SEQ );
+                        END;
+                        END IF;
+                    ELSIF(V_CNT8_1 > 0) THEN
+                        BEGIN
+                        dbms_output.put_line('6.1');
+                            TEMP_CKT_SEQ := 0;
+                            SELECT MAX(CIRCUIT_XREF_SEQ) INTO TEMP_CKT_SEQ FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = REC_O.ALT_VENDOR_ID;
+                                
+                            SELECT TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) INTO V_LOC FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = REC_O.ALT_VENDOR_ID AND CIRCUIT_XREF_SEQ = TEMP_CKT_SEQ;
+                            
+                            UPDATE ASAP.CIRCUIT_XREF SET CIRCUIT_XREF_ECCKT = CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), CIRCUIT_XREF_PROVIDER = REC_O.EXP_NAME, LAST_MODIFIED_DATE = SYSDATE, LAST_MODIFIED_USERID = 'TESTINT'
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = V_LOC AND CIRCUIT_XREF_SEQ = TEMP_CKT_SEQ;
+                                
+                            UPDATE ASAP.DLR_CIRCUIT_DESIGN_LINE SET LOCATION = CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), LAST_MODIFIED_DATE = SYSDATE, LAST_MODIFIED_USERID = 'TESTINT' 
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(LOCATION,'ALT_VENDORID: ','')) = V_LOC;
+                        END;
+                    /*ELSE
+                        BEGIN
+                        dbms_output.put_line('6.2');
+                            SELECT TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) INTO V_LOC FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = REC_O.ALT_VENDOR_ID;
+                            
+                            UPDATE ASAP.CIRCUIT_XREF SET CIRCUIT_XREF_ECCKT = CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), CIRCUIT_XREF_PROVIDER = REC_O.EXP_NAME, LAST_MODIFIED_DATE = SYSDATE, LAST_MODIFIED_USERID = 'TESTINT'
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(CIRCUIT_XREF_ECCKT,'ALT_VENDORID: ','')) = V_LOC;
+                                    
+                            UPDATE ASAP.DLR_CIRCUIT_DESIGN_LINE SET LOCATION = CONCAT('ALT_VENDORID: ',REC_O.ALT_VENDOR_ID), LAST_MODIFIED_DATE = SYSDATE, LAST_MODIFIED_USERID = 'TESTINT' 
+                            WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND TRIM(REPLACE(LOCATION,'ALT_VENDORID: ','')) = V_LOC;
+                        END;*/
+                    END IF;
+                    
+                    DELETE FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_XREF_ECCKT = 'ALT_VENDORID: ' AND CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND CIRCUIT_XREF_PROVIDER = REC_O.EXP_NAME;
+                    DELETE FROM ASAP.DLR_CIRCUIT_DESIGN_LINE WHERE LOCATION = 'ALT_VENDORID: ' AND CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID;
+                    
+                    --EXPENSE NAME
+                    SELECT COUNT(CIRCUIT_DESIGN_ID) INTO V_CNT3 FROM ASAP.DLR_CIRCUIT_DESIGN_LINE WHERE LOCATION = REC_O.EXP_NAME AND CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID;                   
+                    IF(V_CNT3 = 0)THEN
+                    BEGIN
+                        IF(V_CNT1= 0) THEN                                        
+                            INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID) 
+                            VALUES( V_CKT_DESIGN_ID, '3', REC_O.EXP_NAME, 'S', SYSDATE, 'TESTINT');                                       
+                        ELSE
+                        BEGIN            
+                            SELECT MAX(CIRCUIT_XREF_SEQ) INTO V_MAX_CKT_XREF_SEQ  FROM ASAP.CIRCUIT_XREF WHERE CIRCUIT_DESIGN_ID =V_CKT_DESIGN_ID;                                        
+                            V_MAX_CKT_XREF_SEQ :=  V_MAX_CKT_XREF_SEQ+1;
+                                                                                
+                            INSERT INTO ASAP.CIRCUIT_XREF(CIRCUIT_DESIGN_ID,CIRCUIT_XREF_SEQ, CIRCUIT_XREF_ECCKT, CIRCUIT_XREF_TYPE, LAST_MODIFIED_DATE, LAST_MODIFIED_USERID) 
+                            VALUES( V_CKT_DESIGN_ID, V_MAX_CKT_XREF_SEQ, REC_O.EXP_NAME, 'S', SYSDATE, 'TESTINT');
+                        END;                
+                        END IF;
+                                
+                        SELECT MAX(CIRCUIT_XREF_SEQ), MAX(SEQUENCE_NUMBER), MAX(ROW_SEQUENCE_NBR)
+                        INTO V_DLR_MAX_CIRCUIT_XREF_SEQ, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR
+                        FROM ASAP.DLR_CIRCUIT_DESIGN_LINE 
+                        WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR;
+                                
+                        V_MAX_SEQ_NBR := V_MAX_SEQ_NBR+1;
+                        V_MAX_ROW_SEQ_NBR := V_MAX_ROW_SEQ_NBR+1;
+                        V_DLR_MAX_CIRCUIT_XREF_SEQ := V_DLR_MAX_CIRCUIT_XREF_SEQ+1;
+                                
+                        SELECT 'XR' || NVL (TO_CHAR (SUBSTR (MAX (BLOCK_IND), 3) + 1), 1) INTO V_BLOCK_IND FROM ASAP.DLR_CIRCUIT_DESIGN_LINE
+                        WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID AND ISSUE_NBR = V_MAX_ISSUE_NBR AND SUBSTR (BLOCK_IND, 1, 2) = 'XR' 
+                        AND SEQUENCE_NUMBER IN (SELECT MAX(SEQUENCE_NUMBER) FROM DLR_CIRCUIT_DESIGN_LINE WHERE CIRCUIT_DESIGN_ID = V_CKT_DESIGN_ID 
+                        AND SUBSTR (BLOCK_IND, 1, 2) = 'XR' );
+                                
+                        INSERT INTO ASAP.DLR_CIRCUIT_DESIGN_LINE(CIRCUIT_DESIGN_ID, ISSUE_NBR, SEQUENCE_NUMBER,ROW_SEQUENCE_NBR,LOCATION,LAST_MODIFIED_DATE, LAST_MODIFIED_USERID, PRINT_THIS_LINE_ON_DLR_IND,BLOCK_IND,CIRCUIT_XREF_SEQ)
+                        VALUES(V_CKT_DESIGN_ID, V_MAX_ISSUE_NBR, V_MAX_SEQ_NBR, V_MAX_ROW_SEQ_NBR, REC_O.EXP_NAME, SYSDATE, 'TESTINT', 'Y', V_BLOCK_IND, V_DLR_MAX_CIRCUIT_XREF_SEQ );
+                    END;    
+                    END IF;
+                END;
+                ELSE 
+                    UPDATE INTEGRA.MONTHLY_EXPENSE
+                    SET REMARKS = 'NO ISSUE NBR', PROCESSED_DATE = SYSDATE
+                    WHERE ID = REC_O.ID AND (NET_CKT_ID = REC_O.NET_CKT_ID OR LEGACY_CKT_ID = REC_O.LEGACY_CKT_ID OR VENDOR_CKT_ID = REC_O.VENDOR_CKT_ID);  
+                END IF;
+            END;    
+            ELSE            
+                  UPDATE INTEGRA.MONTHLY_EXPENSE
+                  SET REMARKS = 'ECCKT IS NOT AVAILABLE' , PROCESSED_DATE = SYSDATE
+                  WHERE ID = REC_O.ID AND (NET_CKT_ID = REC_O.NET_CKT_ID OR LEGACY_CKT_ID = REC_O.LEGACY_CKT_ID OR VENDOR_CKT_ID = REC_O.VENDOR_CKT_ID);                
+            END IF;
+            
+            SELECT COUNT(*) INTO V_CNT5  FROM INTEGRA.MONTHLY_EXPENSE WHERE REMARKS IS NULL AND ID = REC_O.ID 
+            AND (NET_CKT_ID = REC_O.NET_CKT_ID OR LEGACY_CKT_ID = REC_O.LEGACY_CKT_ID);
+            
+             IF(V_CNT5 > 0)THEN
+                            
+                UPDATE INTEGRA.MONTHLY_EXPENSE
+                SET REMARKS = 'PROCESS COMPLETED' , PROCESSED_DATE = SYSDATE
+                WHERE REMARKS IS NULL AND ID = REC_O.ID AND (NET_CKT_ID = REC_O.NET_CKT_ID OR VENDOR_CKT_ID = REC_O.VENDOR_CKT_ID);
+                                
+            END IF;
+            
+            EXCEPTION WHEN NO_DATA_FOUND THEN
+                BEGIN
+                    UPDATE INTEGRA.MONTHLY_EXPENSE
+                    SET REMARKS = 'SOMETHING WENT WRONG', PROCESSED_DATE = SYSDATE
+                    WHERE  ID = REC_O.ID AND (NET_CKT_ID = REC_O.NET_CKT_ID OR LEGACY_CKT_ID = REC_O.LEGACY_CKT_ID OR VENDOR_CKT_ID = REC_O.VENDOR_CKT_ID);  
+                END;
+                WHEN OTHERS THEN
+                BEGIN
+                    UPDATE INTEGRA.MONTHLY_EXPENSE
+                    SET REMARKS = 'Fetched More than one row', PROCESSED_DATE = SYSDATE
+                    WHERE  ID = REC_O.ID AND  (NET_CKT_ID = REC_O.NET_CKT_ID OR LEGACY_CKT_ID = REC_O.LEGACY_CKT_ID OR VENDOR_CKT_ID = REC_O.VENDOR_CKT_ID);  
+                END;
+            
+            END;
+            COMMIT;
+        END LOOP;
+    
+    END;
+    /*
+    UPDATE INTEGRA.MONTHLY_EXPENSE
+    SET PROCESSED_DATE = SYSDATE
+    WHERE REMARKS = 'PROCESS COMPLETED' AND PROCESSED_DATE IS NULL;
+    */
+END;
+/
